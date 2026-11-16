@@ -43,5 +43,8 @@ else
 fi
 mv "$STAGE" "$DEST"
 /usr/bin/xattr -cr "$DEST"
-open -a "$DEST"
+# A Claude-launched swap would hand its CLAUDE_CODE_* env to every new tab,
+# which turns off transcript saving for each Claude session started there.
+env -i HOME="$HOME" USER="$USER" LOGNAME="$USER" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+  open -a "$DEST"
 echo "done: $("$DEST/Contents/MacOS/ghostty" +version | head -1)"
