@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""gtab: let an agent list, read, type into and focus Ghostty tabs by tab ID.
+
+The tab ID is what Ghostty's tab right-click menu "Copy Tab ID" copies.
+macOS uses Ghostty's AppleScript dictionary. Linux uses the fork's D-Bus
+interface (com.mitchellh.ghostty.Control1), one bus name per process.
+
+  gtab list                     ID, selected (*), title, working directory
+  gtab id                       ID of the tab this command runs in (macOS)
+  gtab read ID [--all] [-n N]   visible text, or all text with scrollback
+  gtab send ID TEXT [--enter]   type TEXT as a paste, then press Enter
+  gtab key ID KEY...            press keys: enter tab escape up down
+                                left right backspace ctrl-c ctrl-d ctrl-l
+  gtab focus ID                 bring the tab to the front
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+
+MAC_APP = os.environ.get("GTAB_MAC_APP", "com.mitchellh.ghostty")
+DBUS_PREFIX = "com.mitchellh.ghostty.Control.p"
+DBUS_PATH = "/com/mitchellh/ghostty/Control"
+DBUS_IFACE = "com.mitchellh.ghostty.Control1"
+
+MAC_KEYS = {
+    "enter": ("enter", ""),
+    "tab": ("tab", ""),
+    "escape": ("escape", ""),
+    "up": ("up", ""),
+    "down": ("down", ""),
+    "left": ("left", ""),
+    "right": ("right", ""),
+    "backspace": ("backspace", ""),
+    "ctrl-c": ("c", "control"),
+    "ctrl-d": ("d", "control"),
+    "ctrl-l": ("l", "control"),
+}
+
+LINUX_KEYS = {
+    "enter": "\\r",
+    "tab": "\\t",
+    "escape": "\\x1b",
+    "up": "\\x1b[A",
+    "down": "\\x1b[B",
+    "right": "\\x1b[C",
+    "left": "\\x1b[D",
+    "backspace": "\\x7f",
+    "ctrl-c": "\\x03",
+    "ctrl-d": "\\x04",
+    "ctrl-l": "\\x0c",
+}
+
+
+class GtabError(Exception):
+    pass
+
+
+def run(cmd, stdin=None):
+    proc = subprocess.run(cmd, input=stdin, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise GtabError(proc.stderr.strip() or "%s failed" % cmd[0])
+    return proc.stdout
+
+
+# macOS ----------------------------------------------------------------------
+
+FIND_TAB = """
+on findTab(tid)
+  tell application id "__APP__"
+    repeat with w in windows
+      repeat with t in tabs of w
+        if (id of t) is tid then return t
+      end repeat
+    end repeat
+  end tell
+  error "no Ghostty tab with id " & tid number 1
+end findTab
+"""
+
+
+def osascript(body, *args):
+    body = body.replace("__APP__", MAC_APP)
+    proc = subprocess.run(["osascript", "-", *args], input=body, capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise GtabError(proc.stderr.strip())
+    return proc.stdout.rstrip("\n")
+
+
+def mac_list():
+    out = osascript("""
+on run argv
+  set TAB_CHAR to character id 9
+  set out to {}
+  tell application id "__APP__"
+    repeat with w in windows
+      repeat with t in tabs of w
+        set sel to "0"
+        if selected of t then set sel to "1"
+        set wd to working directory of (focused terminal of t)
+        set end of out to (id of t) & TAB_CHAR & sel & TAB_CHAR & (name of t) & TAB_CHAR & wd
+      end repeat
+    end repeat
+  end tell
+  set AppleScript's text item delimiters to linefeed
+  return out as text
+end run
+""")
+    tabs = []
+    for line in out.splitlines():
+        tid, sel, title, cwd = (line.split("\t") + ["", "", ""])[:4]
+        tabs.append({"id": tid, "selected": sel == "1", "title": title, "cwd": cwd})
+    return tabs
+
+
+def mac_id():
+    tty = None
+    pid = os.getpid()
+    while pid > 1 and tty is None:
+        out = run(["ps", "-o", "tty=,ppid=", "-p", str(pid)]).split()
+        if not out:
+            break
+        if out[0] not in ("??", "-"):
+            tty = "/dev/" + out[0]
+        pid = int(out[-1])
+    if tty is None:
+        raise GtabError("this command is not running in a Ghostty tab")
+    return osascript("""
+on run argv
+  tell application id "__APP__"
+    repeat with w in windows
+      repeat with t in tabs of w
+        repeat with s in terminals of t
+          if (tty of s) is (item 1 of argv) then return id of t
+        end repeat
+      end repeat
+    end repeat
+  end tell
+  error "no Ghostty tab owns " & (item 1 of argv) number 1
+end run
+""", tty)
+
+
+def mac_read(tid, scrollback):
+    prop = "screen contents" if scrollback else "visible contents"
+    return osascript(FIND_TAB + """
+on run argv
+  set t to findTab(item 1 of argv)
+  tell application id "__APP__"
+    return %s of (focused terminal of t)
+  end tell
+end run
+""" % prop, tid)
+
+
+def mac_send(tid, text):
+    osascript(FIND_TAB + """
+on run argv
+  set t to findTab(item 1 of argv)
+  tell application id "__APP__"
+    input text (item 2 of argv) to (focused terminal of t)
+  end tell
+end run
+""", tid, text)
+
+
+def mac_key(tid, key):
+    name, mods = MAC_KEYS[key]
+    osascript(FIND_TAB + """
+on run argv
+  set t to findTab(item 1 of argv)
+  tell application id "__APP__"
+    if (item 3 of argv) is "" then
+      send key (item 2 of argv) to (focused terminal of t)
+    else
+      send key (item 2 of argv) modifiers (item 3 of argv) to (focused terminal of t)
+    end if
+  end tell
+end run
+""", tid, name, mods)
+
+
+def mac_focus(tid):
+    osascript(FIND_TAB + """
+on run argv
+  set t to findTab(item 1 of argv)
+  tell application id "__APP__"
+    focus (focused terminal of t)
+  end tell
+end run
+""", tid)
+
+
+# Linux ----------------------------------------------------------------------
+
+
+def busctl(*args):
+    return json.loads(run(["busctl", "--user", "--json=short", *args]))
+
+
+def linux_names():
+    names = busctl("call", "org.freedesktop.DBus", "/org/freedesktop/DBus",
+                   "org.freedesktop.DBus", "ListNames")["data"][0]
+    names = [n for n in names if n.startswith(DBUS_PREFIX)]
+    if not names:
+        raise GtabError("no Ghostty with agent control is running (is the fork installed?)")
+    return names
+
+
+def linux_call(name, method, sig="", *args):
+    cmd = ["call", name, DBUS_PATH, DBUS_IFACE, method]
+    if sig:
+        cmd += [sig, *args]
+    return busctl(*cmd)
+
+
+def linux_list():
+    tabs = []
+    for name in linux_names():
+        try:
+            rows = linux_call(name, "ListTabs")["data"][0]
+        except GtabError:
+            continue
+        for tid, title, cwd, sel in rows:
+            tabs.append({"id": tid, "selected": sel, "title": title, "cwd": cwd, "bus": name})
+    return tabs
+
+
+def linux_owner(tid):
+    for tab in linux_list():
+        if tab["id"] == tid:
+            return tab["bus"]
+    raise GtabError("no Ghostty tab with id " + tid)
+
+
+def linux_read(tid, scrollback):
+    return linux_call(linux_owner(tid), "ReadText", "sb", tid,
+                      "true" if scrollback else "false")["data"][0]
+
+
+def linux_send(tid, text, raw=False):
+    linux_call(linux_owner(tid), "SendText", "ssb", tid, text, "true" if raw else "false")
+
+
+def linux_focus(tid):
+    linux_call(linux_owner(tid), "Focus", "s", tid)
+
+
+# CLI ------------------------------------------------------------------------
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="gtab", description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("list")
+    p.add_argument("--json", action="store_true")
+    sub.add_parser("id")
+    p = sub.add_parser("read")
+    p.add_argument("id")
+    p.add_argument("--all", action="store_true", help="include scrollback")
+    p.add_argument("-n", "--lines", type=int, help="only the last N non-empty lines")
+    p = sub.add_parser("send")
+    p.add_argument("id")
+    p.add_argument("text")
+    p.add_argument("--enter", action="store_true", help="press Enter after the text")
+    p = sub.add_parser("key")
+    p.add_argument("id")
+    p.add_argument("keys", nargs="+", choices=sorted(MAC_KEYS))
+    p = sub.add_parser("focus")
+    p.add_argument("id")
+    a = parser.parse_args()
+
+    mac = sys.platform == "darwin"
+    try:
+        if a.cmd == "list":
+            tabs = mac_list() if mac else linux_list()
+            if a.json:
+                print(json.dumps(tabs, indent=2))
+            else:
+                for t in tabs:
+                    print("%s\t%s\t%s\t%s" % (t["id"], "*" if t["selected"] else " ", t["title"], t["cwd"]))
+        elif a.cmd == "id":
+            if not mac:
+                raise GtabError("gtab id works on macOS only; use the tab menu's Copy Tab ID")
+            print(mac_id())
+        elif a.cmd == "read":
+            text = mac_read(a.id, a.all) if mac else linux_read(a.id, a.all)
+            lines = text.rstrip().splitlines()
+            if a.lines:
+                lines = [l for l in lines if l.strip()][-a.lines:]
+            print("\n".join(lines))
+        elif a.cmd == "send":
+            if mac:
+                mac_send(a.id, a.text)
+                if a.enter:
+                    mac_key(a.id, "enter")
+            else:
+                linux_send(a.id, a.text)
+                if a.enter:
+                    linux_send(a.id, LINUX_KEYS["enter"], raw=True)
+        elif a.cmd == "key":
+            for key in a.keys:
+                if mac:
+                    mac_key(a.id, key)
+                else:
+                    linux_send(a.id, LINUX_KEYS[key], raw=True)
+        elif a.cmd == "focus":
+            mac_focus(a.id) if mac else linux_focus(a.id)
+    except GtabError as e:
+        print("gtab: %s" % e, file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
