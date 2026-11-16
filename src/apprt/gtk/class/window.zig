@@ -400,6 +400,7 @@ pub const Window = extern struct {
             .init("prompt-surface-title", actionPromptSurfaceTitle, null),
             .init("prompt-tab-title", actionPromptTabTitle, null),
             .init("prompt-context-tab-title", actionPromptContextTabTitle, null),
+            .init("copy-context-tab-id", actionCopyContextTabId, null),
             .init("prompt-window-title", actionPromptWindowTitle, null),
             .init("ring-bell", actionRingBell, null),
             .init("split-right", actionSplitRight, null),
@@ -2101,6 +2102,17 @@ pub const Window = extern struct {
         const child = page.getChild();
         const tab = gobject.ext.cast(Tab, child) orelse return;
         tab.promptTabTitle();
+    }
+
+    fn actionCopyContextTabId(
+        _: *gio.SimpleAction,
+        _: ?*glib.Variant,
+        self: *Self,
+    ) callconv(.c) void {
+        const page = self.private().context_menu_page orelse return;
+        const tab = gobject.ext.cast(Tab, page.getChild()) orelse return;
+        var buf: [32]u8 = undefined;
+        self.as(gtk.Widget).getClipboard().setText(tab.controlId(&buf));
     }
 
     fn actionPromptSurfaceTitle(

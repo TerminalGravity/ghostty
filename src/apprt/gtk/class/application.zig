@@ -14,6 +14,7 @@ const build_config = @import("../../../build_config.zig");
 const build_info = @import("../build/info.zig");
 const cli = @import("../../../cli.zig");
 const global = @import("../../../global.zig");
+const agent_control = @import("../agent_control.zig");
 const i18n = @import("../../../os/main.zig").i18n;
 const apprt = @import("../../../apprt.zig");
 const CoreApp = @import("../../../App.zig");
@@ -1337,6 +1338,9 @@ pub const Application = extern struct {
         self.openUri().setDbusConnection(
             self.as(gio.Application).getDbusConnection(),
         );
+        if (self.as(gio.Application).getDbusConnection()) |conn| {
+            agent_control.register(self, conn);
+        }
 
         // Setup our event loop
         self.startupXev();

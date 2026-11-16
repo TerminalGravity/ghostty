@@ -280,6 +280,12 @@ pub const Tab = extern struct {
 
     /// Get the currently active surface. See the "active-surface" property.
     /// This does not ref the value.
+    /// The ID that "Copy Tab ID" copies and agent control accepts. It uses
+    /// the same "tab-<address>" form as the macOS AppleScript tab ID.
+    pub fn controlId(self: *Self, buf: []u8) [:0]const u8 {
+        return std.fmt.bufPrintSentinel(buf, "tab-{x}", .{@intFromPtr(self)}, 0) catch "";
+    }
+
     pub fn getActiveSurface(self: *Self) ?*Surface {
         return self.getSplitTree().getActiveSurface();
     }
