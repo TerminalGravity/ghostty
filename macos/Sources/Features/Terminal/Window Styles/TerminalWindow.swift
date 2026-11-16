@@ -227,6 +227,16 @@ class TerminalWindow: NSWindow {
         viewModel.isMainWindow = false
     }
 
+    @objc private func copyTabIDFromContextMenu(_ sender: NSMenuItem) {
+        let controller = sender.representedObject as? BaseTerminalController
+            ?? windowController as? BaseTerminalController
+        guard let controller else { return }
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(ScriptTab.stableID(controller: controller), forType: .string)
+    }
+
     @discardableResult
     func beginInlineTabTitleEdit(for targetWindow: NSWindow) -> Bool {
         tabTitleEditor.beginEditing(for: targetWindow)
@@ -758,6 +768,7 @@ private struct TabColorIndicatorView: View {
 extension TerminalWindow {
     private static let closeTabsOnRightMenuItemIdentifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.closeTabsOnTheRightMenuItem")
     private static let changeTitleMenuItemIdentifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.changeTitleMenuItem")
+    private static let copyTabIDMenuItemIdentifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.copyTabIDMenuItem")
     private static let tabColorSeparatorIdentifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.tabColorSeparator")
 
     private static let tabColorPaletteIdentifier = NSUserInterfaceItemIdentifier("com.mitchellh.ghostty.tabColorPalette")
@@ -813,6 +824,7 @@ extension TerminalWindow {
         menu.removeItems(withIdentifiers: [
             Self.tabColorSeparatorIdentifier,
             Self.changeTitleMenuItemIdentifier,
+            Self.copyTabIDMenuItemIdentifier,
             Self.tabColorPaletteIdentifier
         ])
 
@@ -827,6 +839,13 @@ extension TerminalWindow {
         changeTitleItem.representedObject = target?.window
         changeTitleItem.setImageIfDesired(systemSymbolName: "pencil.line")
         menu.addItem(changeTitleItem)
+
+        let copyTabIDItem = NSMenuItem(title: "Copy Tab ID", action: #selector(TerminalWindow.copyTabIDFromContextMenu(_:)), keyEquivalent: "")
+        copyTabIDItem.identifier = Self.copyTabIDMenuItemIdentifier
+        copyTabIDItem.target = self
+        copyTabIDItem.representedObject = target
+        copyTabIDItem.setImageIfDesired(systemSymbolName: "doc.on.doc")
+        menu.addItem(copyTabIDItem)
 
         let paletteItem = NSMenuItem()
         paletteItem.identifier = Self.tabColorPaletteIdentifier
