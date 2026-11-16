@@ -98,6 +98,12 @@
       <property name="working directory" code="Gwdr" type="text" access="r" description="Current working directory for the terminal process."/>
       <property name="pid" code="Gpid" type="integer" access="r" description="PID of the foreground process in this terminal."/>
       <property name="tty" code="Gtty" type="text" access="r" description="TTY device path for this terminal (e.g. /dev/ttys016)."/>
+      <property name="screen contents" code="Gscn" type="text" access="r" description="All text in this terminal, including scrollback.">
+        <cocoa key="screenContents"/>
+      </property>
+      <property name="visible contents" code="Gvct" type="text" access="r" description="The text that is visible in this terminal now.">
+        <cocoa key="visibleContents"/>
+      </property>
       <responds-to command="split">
         <cocoa method="handleSplitCommand:"/>
       </responds-to>

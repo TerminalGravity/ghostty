@@ -14,6 +14,8 @@ import AppKit
 /// - `property working directory` -> `@objc(workingDirectory)` getter below.
 /// - `property pid` -> `@objc(pid)` getter below.
 /// - `property tty` -> `@objc(tty)` getter below.
+/// - `property screen contents` -> `@objc(screenContents)` getter below.
+/// - `property visible contents` -> `@objc(visibleContents)` getter below.
 ///
 /// We keep only a weak reference to the underlying `SurfaceView` so this
 /// wrapper never extends the terminal's lifetime.
@@ -84,6 +86,20 @@ final class ScriptTerminal: NSObject {
     var tty: String {
         guard NSApp.isAppleScriptEnabled else { return "" }
         return surfaceView?.surfaceModel?.ttyName ?? ""
+    }
+
+    /// Exposed as the AppleScript `screen contents` property.
+    @objc(screenContents)
+    var screenContents: String {
+        guard NSApp.isAppleScriptEnabled else { return "" }
+        return surfaceView?.cachedScreenContents.get() ?? ""
+    }
+
+    /// Exposed as the AppleScript `visible contents` property.
+    @objc(visibleContents)
+    var visibleContents: String {
+        guard NSApp.isAppleScriptEnabled else { return "" }
+        return surfaceView?.cachedVisibleContents.get() ?? ""
     }
 
     /// Used by command handling (`perform action ... on <terminal>`).
