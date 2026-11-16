@@ -197,7 +197,8 @@ end run
 
 
 def busctl(*args):
-    return json.loads(run(["busctl", "--user", "--json=short", *args]))
+    out = run(["busctl", "--user", "--json=short", *args]).strip()
+    return json.loads(out) if out else {}
 
 
 def linux_names():
