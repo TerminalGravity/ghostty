@@ -1,0 +1,90 @@
+# Ghostty from the TerminalGravity fork, packaged for Omarchy.
+#
+# Same build as Omarchy's ghostty package (omacom/omarchy-pkgs), from the
+# fork's branch instead of the release tarball. It replaces `ghostty` and
+# keeps Omarchy's ghostty-shell-integration and ghostty-terminfo packages.
+#
+# Build and install:  makepkg -f && sudo pacman -U ghostty-tg-*.pkg.tar.zst
+# Roll back:          sudo pacman -S ghostty
+
+pkgname=ghostty-tg
+_branch=jack/copy-tab-id
+pkgver=1.4.0
+pkgrel=1
+pkgdesc='Ghostty terminal (TerminalGravity fork: Copy Tab ID and agent control)'
+arch=(x86_64 aarch64)
+url='https://github.com/TerminalGravity/ghostty'
+license=(MIT)
+depends=(
+  bzip2
+  fontconfig
+  freetype2
+  glib2
+  glibc
+  gtk4
+  gtk4-layer-shell
+  harfbuzz
+  libadwaita
+  libegl
+  libpng
+  oniguruma
+  pixman
+  wayland
+  zlib
+  ghostty-shell-integration
+  ghostty-terminfo
+  python
+)
+makedepends=(
+  blueprint-compiler
+  gettext
+  git
+  pkgconf
+)
+provides=("ghostty=$pkgver")
+conflicts=(ghostty)
+_zigver=0.17.0
+source=("ghostty::git+$url.git#branch=$_branch")
+sha256sums=('SKIP')
+source_x86_64=("https://ziglang.org/download/$_zigver/zig-x86_64-linux-$_zigver.tar.xz")
+sha256sums_x86_64=('1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026')
+source_aarch64=("https://ziglang.org/download/$_zigver/zig-aarch64-linux-$_zigver.tar.xz")
+sha256sums_aarch64=('9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8')
+
+pkgver() {
+  cd ghostty
+  printf '1.4.0.r%s.g%s' "$(git rev-list --count v1.4.0..HEAD)" "$(git rev-parse --short=9 HEAD)"
+}
+
+prepare() {
+  cd ghostty
+  PATH="$srcdir/zig-$CARCH-linux-$_zigver:$PATH" \
+    ZIG_GLOBAL_CACHE_DIR="$srcdir/zig-global-cache" \
+    zig build --fetch=all --pkg-dir "$srcdir/zig-pkg"
+}
+
+build() {
+  cd ghostty
+  PATH="$srcdir/zig-$CARCH-linux-$_zigver:$PATH" \
+    DESTDIR=build \
+    zig build \
+      --prefix /usr \
+      --system "$srcdir/zig-pkg" \
+      -Doptimize=ReleaseFast \
+      -Dgtk-x11=true \
+      -Dcpu=baseline \
+      -Dpie=true \
+      -Demit-docs=false \
+      -Dversion-string="1.4.0+tg.$(git rev-parse --short=9 HEAD)" \
+      --build-id=sha1
+}
+
+package() {
+  cd ghostty
+  cp -a build/* "$pkgdir/"
+  rm -r "$pkgdir/usr/share/terminfo" \
+    "$pkgdir/usr/share/ghostty/shell-integration" \
+    "$pkgdir/usr/share/nautilus-python"
+  install -Dm0755 agent/gtab "$pkgdir/usr/bin/gtab"
+  install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
